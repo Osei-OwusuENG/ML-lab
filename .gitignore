@@ -4,6 +4,7 @@
 *.d
 #personal files to ignore
 data/
+mlcolab.ipynb
 
 # Object files
 *.o
