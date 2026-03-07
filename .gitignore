@@ -2,6 +2,8 @@
 ### C ###
 # Prerequisites
 *.d
+#personal files to ignore
+data/
 
 # Object files
 *.o
