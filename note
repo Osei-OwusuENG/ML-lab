@@ -1,0 +1,17 @@
+project/
+│
+├── data/
+│   ├── raw/
+│   ├── processed/
+│
+├── src/
+│   ├── data_loader.py
+│   ├── preprocess.py
+│   ├── train_models.py
+│   ├── evaluate.py
+│
+├── models/
+│
+├── notebooks/
+│
+└── main.py
