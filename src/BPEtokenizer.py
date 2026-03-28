@@ -1,96 +1,229 @@
-import os
+import json
 import re
 from collections import defaultdict
-import json
 
 
-# CREATE TOKENIZER CLASS
-class BPETokenizer():
-    def __init__(self, merges):
-        self.merges = merges
-        self.bpe_ranks = {pair: i for pair, i in enumerate(self.merges)}
+class BPETokenizer:
+    WORD_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
 
-        self.encoder = {} # STORE TOKEN -> ID
-        self.decoder = {} # STORE ID -> TOKEN
+    def __init__(self, lowercase=True, unk_token="[UNK]", end_of_word="</w>"):
+        self.lowercase = lowercase
+        self.unk_token = unk_token
+        self.end_of_word = end_of_word
 
-    def apply_bpe(self, word):
-        
-        word = list(word) + ['</w>']
-        
-        while True:
-            new_word = []
+        self.merges = []
+        self.bpe_ranks = {}
+        self.encoder = {}
+        self.decoder = {}
 
-            pairs = [(word[i], word[i+1]) for i in range(len(word) - 1)]
+        self._alphabet = set()
+        self._word_freq = {}
+        self._cache = {}
 
+    def _normalize_text(self, text):
+        return text.lower() if self.lowercase else text
+
+    def _iter_texts(self, corpus):
+        if isinstance(corpus, str):
+            yield corpus
+            return
+
+        for text in corpus:
+            if text is None:
+                continue
+            yield str(text)
+
+    def _pre_tokenize(self, text):
+        return self.WORD_PATTERN.findall(self._normalize_text(text))
+
+    def _word_to_symbols(self, word):
+        return tuple(list(word) + [self.end_of_word])
+
+    def _merge_word(self, word, pair):
+        merged = []
+        merged_token = "".join(pair)
+        index = 0
+
+        while index < len(word):
+            if index < len(word) - 1 and (word[index], word[index + 1]) == pair:
+                merged.append(merged_token)
+                index += 2
+                continue
+
+            merged.append(word[index])
+            index += 1
+
+        return tuple(merged)
+
+    def _get_pair_stats(self, word_freq):
+        pairs = defaultdict(int)
+        for word, freq in word_freq.items():
+            for index in range(len(word) - 1):
+                pairs[(word[index], word[index + 1])] += freq
+        return pairs
+
+    def _count_words(self, corpus):
+        word_freq = defaultdict(int)
+        alphabet = set()
+
+        for text in self._iter_texts(corpus):
+            for word in self._pre_tokenize(text):
+                symbols = self._word_to_symbols(word)
+                word_freq[symbols] += 1
+                alphabet.update(symbols[:-1])
+
+        return word_freq, alphabet
+
+    def learn_bpe(self, corpus, num_merges=10000, min_freq=2):
+        word_freq, alphabet = self._count_words(corpus)
+        if not word_freq:
+            raise ValueError("Cannot learn BPE from an empty corpus.")
+
+        self.merges = []
+        self.bpe_ranks = {}
+        self.encoder = {}
+        self.decoder = {}
+        self._cache = {}
+        self._alphabet = alphabet
+
+        for merge_idx in range(num_merges):
+            pairs = self._get_pair_stats(word_freq)
             if not pairs:
                 break
 
-            rank_pair = [(pair, self.bpe_ranks.get(pair, float('inf'))) for pair in pairs]
-            best_pair = min(rank_pair, key=lambda x: x[1])[0]
-
-            if best_pair not in rank_pair:
+            best_pair, best_freq = max(pairs.items(), key=lambda item: item[1])
+            if best_freq < min_freq:
                 break
 
+            self.merges.append(best_pair)
+            self.bpe_ranks[best_pair] = merge_idx
 
-            i = 0
+            merged_word_freq = defaultdict(int)
+            for word, freq in word_freq.items():
+                merged_word_freq[self._merge_word(word, best_pair)] += freq
+            word_freq = merged_word_freq
 
-            while i < len(word):
+            if (merge_idx + 1) % 1000 == 0:
+                print(f"Learned {merge_idx + 1} merges...")
 
-                if i < len(word) - 1 and (word[i], word[i+1]) == best_pair:
-                    new_word.append(best_pair)
-                    i += 2
-                else:
-                    new_word.append(word[i])
-                    i += 1
-            
-            word = new_word
+        self._word_freq = dict(word_freq)
+        print(f"Successfully learned {len(self.merges)} merges")
+        return self.merges
 
-        return word
-    
-    def BuildVacab(self, corpus):
+    def build_vocab(self):
+        token_set = {self.unk_token, self.end_of_word}
+        token_set.update(self._alphabet)
+        token_set.update("".join(pair) for pair in self.merges)
 
-        token = set()
+        for word in self._word_freq:
+            token_set.update(word)
 
-        for sentence in corpus:
-            words = re.findall(r"\w+|[^w\s]", sentence.lower())
-        
-            for word in words:
-                token.update(self.apply_bpe(word))
+        sorted_tokens = sorted(token_set, key=lambda token: (len(token), token))
+        self.encoder = {token: index for index, token in enumerate(sorted_tokens)}
+        self.decoder = {index: token for token, index in self.encoder.items()}
 
-            self.encoder = {tok:id for id, tok in enumerate(sorted(token))}
-            self.decoder = {id:tok for tok, id in self.encoder.items()}
+        print(f"Vocabulary built with {len(self.encoder)} tokens")
+        return self.encoder
 
-        return token
+    def apply_bpe(self, word):
+        normalized_word = self._normalize_text(word)
+        if not normalized_word:
+            return []
 
-    # SAVE VOCAB
-    def save_vacab(self, filepath='./data/processed/vacab.json'):
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(self.encoder, f, indent= 2)
+        cached = self._cache.get(normalized_word)
+        if cached is not None:
+            return list(cached)
 
-    # LOAD VOCAB
-    def load_vocab(filepath="./data/processed/vocab.json"):
-        with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
+        symbols = self._word_to_symbols(normalized_word)
+        while len(symbols) > 1:
+            available_pairs = [
+                pair
+                for pair in zip(symbols, symbols[1:])
+                if pair in self.bpe_ranks
+            ]
+            if not available_pairs:
+                break
 
+            best_pair = min(available_pairs, key=lambda pair: self.bpe_ranks[pair])
+            symbols = self._merge_word(symbols, best_pair)
 
-    # ENCODE
+        self._cache[normalized_word] = symbols
+        return list(symbols)
+
     def encode(self, text):
-        token = []
-        words = re.findall("\w+|[^w\s]", text.lower())
+        if not self.encoder:
+            raise ValueError("Build or load the vocabulary before encoding text.")
 
-        for word in words:
-            token.extend(self.apply_bpe(word))
-        
-        ids = [self.encoder[tok] for tok in token]
+        unknown_id = self.encoder[self.unk_token]
+        encoded = []
 
-        return token, ids
+        for word in self._pre_tokenize(text):
+            for token in self.apply_bpe(word):
+                encoded.append(self.encoder.get(token, unknown_id))
 
-    # DECODE
-    def decode(self, ids):
+        return encoded
 
-        token = [self.decoder[id] for id in ids]
+    def decode(self, token_ids):
+        if not self.decoder:
+            raise ValueError("Build or load the vocabulary before decoding token ids.")
 
-        text = ''.join(token)
-        text = text.replace('</w>', ' ')
+        words = []
+        current_word = ""
 
-        return text.strip()
+        for token_id in token_ids:
+            token = self.decoder.get(token_id, self.unk_token)
+
+            if token == self.unk_token:
+                if current_word:
+                    words.append(current_word)
+                    current_word = ""
+                words.append(token)
+                continue
+
+            if token == self.end_of_word:
+                if current_word:
+                    words.append(current_word)
+                    current_word = ""
+                continue
+
+            if token.endswith(self.end_of_word):
+                current_word += token[: -len(self.end_of_word)]
+                words.append(current_word)
+                current_word = ""
+                continue
+
+            current_word += token
+
+        if current_word:
+            words.append(current_word)
+
+        text = " ".join(words)
+        text = re.sub(r"\s+([,.;:!?%)\]\}])", r"\1", text)
+        text = re.sub(r"([(\[\{])\s+", r"\1", text)
+        return text
+
+    def save(self, vocab_path="vocab.json", merges_path="merges.json"):
+        with open(vocab_path, "w", encoding="utf-8") as vocab_file:
+            json.dump(self.encoder, vocab_file, indent=2, ensure_ascii=False)
+
+        merges_list = [list(pair) for pair in self.merges]
+        with open(merges_path, "w", encoding="utf-8") as merges_file:
+            json.dump(merges_list, merges_file, indent=2, ensure_ascii=False)
+
+        print(f"Saved vocab to {vocab_path}")
+        print(f"Saved merges to {merges_path}")
+
+    def load(self, vocab_path="vocab.json", merges_path="merges.json"):
+        with open(vocab_path, "r", encoding="utf-8") as vocab_file:
+            self.encoder = json.load(vocab_file)
+        self.decoder = {index: token for token, index in self.encoder.items()}
+
+        with open(merges_path, "r", encoding="utf-8") as merges_file:
+            merges_list = json.load(merges_file)
+
+        self.merges = [tuple(pair) for pair in merges_list]
+        self.bpe_ranks = {pair: index for index, pair in enumerate(self.merges)}
+        self._cache = {}
+
+        print(f"Loaded {len(self.encoder)} tokens and {len(self.merges)} merges")
+        return self
