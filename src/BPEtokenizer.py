@@ -1,20 +1,21 @@
 import os
 import re
 from collections import defaultdict
+import json
 
 
 # CREATE TOKENIZER CLASS
 class BPETokenizer():
     def __init__(self, merges):
         self.merges = merges
-        self.bpe_ranks = [{pair: i for pair, i in enumerate(self.merges)}]
+        self.bpe_ranks = {pair: i for pair, i in enumerate(self.merges)}
 
         self.encoder = {} # STORE TOKEN -> ID
         self.decoder = {} # STORE ID -> TOKEN
 
     def apply_bpe(self, word):
         
-        word = list(word) + '</w>'
+        word = list(word) + ['</w>']
         
         while True:
             new_word = []
@@ -25,7 +26,7 @@ class BPETokenizer():
                 break
 
             rank_pair = [(pair, self.bpe_ranks.get(pair, float('inf'))) for pair in pairs]
-            best_pair = min(rank_pair, key=lambda x: x(1))[0]
+            best_pair = min(rank_pair, key=lambda x: x[1])[0]
 
             if best_pair not in rank_pair:
                 break
@@ -51,18 +52,31 @@ class BPETokenizer():
         token = set()
 
         for sentence in corpus:
-            words = [re.findall(r"\w+|[^w\s]"), sentence.lower()]
+            words = re.findall(r"\w+|[^w\s]", sentence.lower())
         
             for word in words:
-                token.update(self.apply_bpe(word, self.bpe_ranks))
+                token.update(self.apply_bpe(word))
 
             self.encoder = {tok:id for id, tok in enumerate(sorted(token))}
-            self.decoder = {id:tok for tok, id in self.encoder.item()}
+            self.decoder = {id:tok for tok, id in self.encoder.items()}
+
+        return token
+
+    # SAVE VOCAB
+    def save_vacab(self, filepath='./data/processed/vacab.json'):
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(self.encoder, f, indent= 2)
+
+    # LOAD VOCAB
+    def load_vocab(filepath="./data/processed/vocab.json"):
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+
 
     # ENCODE
     def encode(self, text):
         token = []
-        words = [re.findall("\w+|[^w\s]"), text.lower()]
+        words = re.findall("\w+|[^w\s]", text.lower())
 
         for word in words:
             token.extend(self.apply_bpe(word))

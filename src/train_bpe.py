@@ -2,6 +2,7 @@ import os
 from collections import defaultdict
 import numpy as np
 import re
+import json
 
 
 def get_corpus(text):
@@ -70,3 +71,29 @@ def train_bpe(text, num_merges=10):
         corpus = merge_pairs(best_pairs, corpus)
 
     return merges, corpus
+
+def save_bpe(merges, v=0.2, path="./data/processed/vocab.bpe"):
+    seen = set()
+    unique_merges = []
+
+    for a, b in merges:
+        if (a, b) not in seen:
+            seen.add((a, b))
+            unique_merges.append((a, b))
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("#version: 0.1\n")
+        for a, b in unique_merges:
+            f.write(f"{a} {b}\n")
+
+
+def load_bpe(filepath="./data/processed/vocab.bpe"):
+    merges = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("#") or line.strip() == "":
+                continue
+            a, b = line.strip().split()
+            merges.append((a, b))
+    return merges
+
