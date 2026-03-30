@@ -11,6 +11,10 @@ class BPETokenizer:
         self.unk_token = unk_token
         self.end_of_word = end_of_word
 
+        self.pad_token = "<pad>"
+        self.end_token = "<end>"
+        self.start_token = "<start>"
+
         self.merges = []
         self.bpe_ranks = {}
         self.encoder = {}
@@ -111,7 +115,7 @@ class BPETokenizer:
         return self.merges
 
     def build_vocab(self):
-        token_set = {self.unk_token, self.end_of_word}
+        token_set = {self.unk_token, self.end_of_word, self.pad_token, self.start_token, self.end_token}
         token_set.update(self._alphabet)
         token_set.update("".join(pair) for pair in self.merges)
 
@@ -150,16 +154,22 @@ class BPETokenizer:
         self._cache[normalized_word] = symbols
         return list(symbols)
 
-    def encode(self, text):
+    def encode(self, text, add_special_tokens=False):
         if not self.encoder:
             raise ValueError("Build or load the vocabulary before encoding text.")
 
         unknown_id = self.encoder[self.unk_token]
         encoded = []
 
+        if add_special_tokens:
+            encoded.append(self.encoder[self.start_token])
+
         for word in self._pre_tokenize(text):
             for token in self.apply_bpe(word):
                 encoded.append(self.encoder.get(token, unknown_id))
+
+        if add_special_tokens:
+            encoded.append(self.encoder[self.end_token])
 
         return encoded
 
@@ -172,6 +182,9 @@ class BPETokenizer:
 
         for token_id in token_ids:
             token = self.decoder.get(token_id, self.unk_token)
+
+            if token in {self.pad_token, self.start_token, self.end_token}:
+                continue
 
             if token == self.unk_token:
                 if current_word:
@@ -201,6 +214,33 @@ class BPETokenizer:
         text = re.sub(r"\s+([,.;:!?%)\]\}])", r"\1", text)
         text = re.sub(r"([(\[\{])\s+", r"\1", text)
         return text
+    
+    def add_special_tokens(self):
+        return {
+            "pad": self.encoder[self.pad_token],
+            "start": self.encoder[self.start_token],
+            "end": self.encoder[self.end_token],
+            "unk": self.encoder[self.unk_token],
+        }
+
+    def pad_sequence_with_mask(self, token_ids, padding_side="right"):
+        if not self.encoder:
+            raise ValueError("Build or load the vocabulary before padding sequences.")
+        
+        max_len = max(len(seq) for seq in token_ids)
+        padded = []
+        mask = []
+
+        for seq in token_ids:
+            if padding_side == "right":
+                padded.append(seq + [self.encoder[self.pad_token]] * (max_len - len(seq)))
+                mask.append([1] * len(seq) + [0] * (max_len - len(seq)))
+            else:
+                padded.append([self.encoder[self.pad_token]] * (max_len - len(seq)) + seq)
+                mask.append([0] * (max_len - len(seq)) + [1] * len(seq))
+
+        return padded, mask
+
 
     def save(self, vocab_path="vocab.json", merges_path="merges.json"):
         with open(vocab_path, "w", encoding="utf-8") as vocab_file:
