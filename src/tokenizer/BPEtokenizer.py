@@ -110,6 +110,7 @@ class BPETokenizer:
             if (merge_idx + 1) % 1000 == 0:
                 print(f"Learned {merge_idx + 1} merges...")
 
+
         self._word_freq = dict(word_freq)
         print(f"Successfully learned {len(self.merges)} merges")
         return self.merges
@@ -123,11 +124,13 @@ class BPETokenizer:
             token_set.update(word)
 
         sorted_tokens = sorted(token_set, key=lambda token: (len(token), token))
-        self.encoder = {token: index for index, token in enumerate(sorted_tokens)}
+        arranged_tokens = [self.pad_token, self.start_token, self.end_token, self.unk_token] + sorted_tokens
+        arranged_tokens = list(dict.fromkeys(arranged_tokens))  # Remove duplicates while preserving order
+        self.encoder = {token: index for index, token in enumerate(arranged_tokens)}
         self.decoder = {index: token for token, index in self.encoder.items()}
 
         print(f"Vocabulary built with {len(self.encoder)} tokens")
-        return self.encoder
+
 
     def apply_bpe(self, word):
         normalized_word = self._normalize_text(word)
@@ -165,6 +168,16 @@ class BPETokenizer:
             encoded.append(self.encoder[self.start_token])
 
         for word in self._pre_tokenize(text):
+
+            word_end_token = word + self.end_of_word
+            if word_end_token in self.encoder:
+                encoded.append(self.encoder[word_end_token])
+                continue
+
+            # if word in self.encoder:
+            #     encoded.append(self.encoder[word])
+            #     continue
+
             for token in self.apply_bpe(word):
                 encoded.append(self.encoder.get(token, unknown_id))
 
@@ -211,8 +224,9 @@ class BPETokenizer:
             words.append(current_word)
 
         text = " ".join(words)
-        text = re.sub(r"\s+([,.;:!?%)\]\}])", r"\1", text)
-        text = re.sub(r"([(\[\{])\s+", r"\1", text)
+        text = re.sub(r"\s+([,.;:!?%')\]\}])", r"\1", text)
+        text = re.sub(r"([('\[\{])\s+", r"\1", text)
+        text = re.sub(r'"\s+([^"]*?)\s+"', r'"\1"', text)
         return text
     
     def add_special_tokens(self):

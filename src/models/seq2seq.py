@@ -4,33 +4,6 @@ import torch.optim as optim
 import pandas as pd
 import numpy as np
 
-# creating an seq2seq model
-class lstmencoderModel(nn.module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
-
-    def forward(self, x):
-
-        x = self.embedding(x)
-        output, (hidden, cell) = self.lstm(x)
-
-        return hidden, cell
-    
-
-class decoderModel(nn.module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, vocab_size)
-
-    def forward(self, x, hidden, cell):
-        x = self.embedding(x)
-        output, (hidden, cell) = self.lstm(x, (hidden, cell))
-        prediction = self.fc(output)
-        return prediction, hidden, cell
     
 
 class seq2seqModel(nn.Module):
@@ -68,5 +41,3 @@ class seq2seqModel(nn.Module):
             input = trg[:, t] if teacher_force else top1
 
         return outputs
-
-

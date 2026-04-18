@@ -5,6 +5,7 @@
 #personal files to ignore
 data/
 mlcolab.ipynb
+ex.py
 
 
 # Object files
